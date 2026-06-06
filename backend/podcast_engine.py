@@ -8,7 +8,7 @@ import base64
 import logging
 import textwrap
 from concurrent.futures import ThreadPoolExecutor
-
+import httpx
 import pypdf
 from docx import Document as DocxDocument
 from pptx import Presentation
@@ -317,39 +317,44 @@ def _split_tts(text: str, size: int = 250) -> list[str]:
     if cur:
         chunks.append(cur)
     return chunks or [text[:size]]
+
 def _tts_segment(text: str, voice_id: str) -> bytes:
-    """
-    Fetch one TTS segment as MP3.
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+    }
+    payload = {
+        "text": text,
+        "model_id": "eleven_turbo_v2",
+        "output_format": "mp3_44100_128",
+    }
 
-    Key fix: exhaust the generator into a bytearray (not b"".join of a lazy
-    generator) so we hold a reference to ALL chunks before returning.
-    This prevents partial reads on Render's network.
-    """
-    buf = bytearray()
-    for chunk in elevenlabs_client.text_to_speech.convert(
-        text=text,
-        voice_id=voice_id,
-        model_id="eleven_turbo_v2",
-        output_format="mp3_44100_128",   
-    ):
-        if chunk:                        
-            buf.extend(chunk)
+    with httpx.Client(follow_redirects=False, timeout=30) as client:
+        r = client.post(url, json=payload, headers=headers)
 
-    if len(buf) < 100:
-        raise RuntimeError(f"TTS returned suspiciously small payload ({len(buf)} bytes) for: {text[:40]!r}")
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"ElevenLabs API returned {r.status_code}. "
+            f"Body: {r.text[:300]}"
+        )
 
-    return bytes(buf)
-_MP3_SILENCE_FRAME = (
-    b"\xff\xfb\x90\x00"   
-    + b"\x00" * 413        
-)
-_MP3_PAUSE = _MP3_SILENCE_FRAME * 8   
+    content_type = r.headers.get("content-type", "")
+    if "audio" not in content_type:
+        raise RuntimeError(
+            f"ElevenLabs returned non-audio content-type: {content_type}. "
+            f"Body preview: {r.text[:300]}"
+        )
+
+    if len(r.content) < 1000:
+        raise RuntimeError(
+            f"ElevenLabs returned suspiciously small payload ({len(r.content)} bytes). "
+            f"Body: {r.text[:300]}"
+        )
+
+    return r.content
 def generate_audio(dialogue: list[dict]) -> bytes:
-    """
-    Generate all dialogue as MP3 and concatenate with silence pauses.
-    Returns raw MP3 bytes (no WAV wrapping needed).
-    MP3 concatenation is safe because each frame is self-contained.
-    """
     segments: list[bytes] = []
     total_chars = 0
 
@@ -365,16 +370,12 @@ def generate_audio(dialogue: list[dict]) -> bytes:
                     log.warning("TTS line %d attempt %d: %s", i, attempt, e)
                     if attempt < 3:
                         time.sleep(1.5 * attempt)
-        segments.append(_MP3_PAUSE)
-
     if not segments:
         raise RuntimeError("No audio segments were generated.")
+
     mp3_out  = b"".join(segments)
     duration = len(mp3_out) / 16_000
-    log.info(
-        "Audio: ~%.1f seconds (~%.1f min) — %d bytes MP3",
-        duration, duration / 60, len(mp3_out),
-    )
+    log.info("Audio: ~%.1f seconds (~%.1f min) — %d bytes MP3", duration, duration / 60, len(mp3_out))
     return mp3_out
 def run_pipeline(file_bytes: bytes, filename: str) -> dict:
     """
