@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PodcastAI — Documents to Podcasts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="index.css"/>
+</head>
+<body>
+<div id="app">
+
+<div id="toasts"></div>
+
+<nav class="topbar">
+  <div class="topbar-logo" onclick="nav('home')"><span class="dot"></span>PodcastAI</div>
+  <div class="topbar-nav">
+    <button class="nav-btn" onclick="nav('home')">Home</button>
+    <button class="nav-btn" onclick="nav('dashboard')">Dashboard</button>
+    <button class="nav-btn" onclick="nav('about')">About</button>
+    <button class="nav-btn" onclick="nav('contact')">Contact</button>
+  </div>
+  <div class="topbar-right">
+    <button class="icon-btn mob-menu" id="mob-menu" onclick="toggleSb()">☰</button>
+    <button class="icon-btn" onclick="toggleTheme()" id="theme-btn" title="Toggle theme">☀</button>
+    <div id="auth-btns" style="display:flex;gap:6px">
+      <button class="chip" onclick="nav('login')">Sign in</button>
+      <button class="chip filled" onclick="nav('signup')">Sign up</button>
+    </div>
+    <div id="user-area" style="display:none;align-items:center;gap:7px">
+      <div class="avatar" id="uavatar" title="Your account">?</div>
+      <button class="chip" onclick="logout()">Sign out</button>
+    </div>
+  </div>
+</nav>
+
+<!-- HOME -->
+<div class="page scrollable" id="page-home">
+  <div class="home-wrap">
+    <div class="hero">
+      <div class="hero-eyebrow"><span></span>AI-Powered Document to Podcast</div>
+      <h1>Turn any document into<br/>an <em>engaging podcast</em></h1>
+      <p>Upload a PDF, DOCX, or TXT. Get a fully voiced two-host conversation powered by Groq and ElevenLabs.</p>
+      <div class="hero-cta">
+        <button class="btn-hero solid" onclick="nav('dashboard')">Start generating →</button>
+      </div>
+    </div>
+    <div class="feat-grid">
+      <div class="feat"><div class="feat-ico">⚡</div><h3>Lightning fast</h3><p>Parallel OCR and chunk processing handles 80+ page documents.</p></div>
+      <div class="feat"><div class="feat-ico">🎙</div><h3>Real voices</h3><p>Alex and Jordan — two distinct voices for natural banter.</p></div>
+      <div class="feat"><div class="feat-ico">🧹</div><h3>Smart filtering</h3><p>Regex + LLM removes boilerplate, TOC, and cover-page noise.</p></div>
+      <div class="feat"><div class="feat-ico">🔗</div><h3>Share links</h3><p>Shareable public URLs for every podcast — no login needed to listen.</p></div>
+      <div class="feat"><div class="feat-ico">📚</div><h3>Full history</h3><p>All podcasts stored in MongoDB Atlas, accessible everywhere.</p></div>
+      <div class="feat"><div class="feat-ico">🌙</div><h3>Dark mode</h3><p>Easy on the eyes — switch themes anytime with one click.</p></div>
+    </div>
+  </div>
+  <div class="home-how">
+    <div class="home-wrap">
+      <div class="sec-title">How it works</div>
+      <div class="sec-sub">Four steps from document to broadcast</div>
+      <div class="flow">
+        <div class="flow-step"><div class="flow-n">1</div><div class="flow-lbl">Upload</div></div>
+        <div class="flow-step"><div class="flow-n">2</div><div class="flow-lbl">Extract</div></div>
+        <div class="flow-step"><div class="flow-n">3</div><div class="flow-lbl">Script</div></div>
+        <div class="flow-step"><div class="flow-n">4</div><div class="flow-lbl">Voice</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div class="page" id="page-dashboard">
+  <div class="sb-backdrop" id="sb-backdrop" onclick="toggleSb()"></div>
+  <div class="dash-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sb-top">
+        <button class="new-btn" onclick="newSession()">✦ New podcast</button>
+        <div class="sb-search">
+          <input type="text" id="sb-search" placeholder="Search history…" oninput="filterHist(this.value)"/>
+        </div>
+      </div>
+      <div class="sb-section">History</div>
+      <div class="hist-list" id="hist-list"></div>
+      <div class="sb-footer"><div class="sb-stat"><span id="hist-count">0</span> podcasts</div></div>
+    </aside>
+    <div class="main-panel">
+      <div class="status-bar">
+        <div class="status-pill"></div>
+      </div>
+      <div class="scrollable">
+        <div class="content">
+
+          <!-- Upload card -->
+          <div class="card" id="upload-card">
+            <div class="card-head"><span>📄</span><h3>Upload document</h3></div>
+            <div class="card-body">
+              <div class="dropzone" id="dropzone" onclick="document.getElementById('file-inp').click()">
+                <div class="dz-ico">⬆</div>
+                <div class="dz-title">Click to upload or drag &amp; drop</div>
+                <div class="dz-hint">PDF, TXT, DOCX, PPTX — max 10 MB</div>
+              </div>
+              <div class="file-pill" id="file-pill" style="display:none">
+                <span>📄</span>
+                <span class="fp-name" id="fp-name"></span>
+                <span class="fp-size" id="fp-size"></span>
+                <button onclick="clearFile()" title="Remove">✕</button>
+              </div>
+              <input type="file" id="file-inp" accept=".pdf,.txt,.docx,.pptx" style="display:none" onchange="onFileChange(this)"/>
+              <button class="gen-btn" id="gen-btn" onclick="generate()" disabled>✦ Generate podcast</button>
+            </div>
+          </div>
+
+          <!-- Progress card -->
+          <div class="card" id="prog-card" style="display:none">
+            <div class="card-head"><span>⚙</span><h3>Generating…</h3></div>
+            <div class="card-body">
+              <div class="steps-row">
+                <div class="step-item" id="s1">Extract</div>
+                <div class="step-item" id="s2">Filter</div>
+                <div class="step-item" id="s3">Script</div>
+                <div class="step-item" id="s4">Audio</div>
+              </div>
+              <div class="prog-wrap"><div class="prog-fill" id="prog-fill"></div></div>
+              <div class="prog-lbl" id="prog-lbl">Preparing…</div>
+            </div>
+          </div>
+
+          <!-- Result card -->
+          <div class="card" id="result-card" style="display:none">
+            <div class="result-tabs">
+              <div class="rtab active" onclick="switchTab('script',this)">Script</div>
+              <div class="rtab" onclick="switchTab('audio',this)">Audio</div>
+            </div>
+            <div class="rpane active" id="pane-script">
+              <div class="script-box" id="script-out"></div>
+              <div class="act-row">
+                <button class="act-btn" onclick="dlScript()">📄 Script</button>
+                <button class="act-btn accent" onclick="openShare()">🔗 Share</button>
+              </div>
+            </div>
+            <div class="rpane" id="pane-audio">
+              <audio controls class="audio-player" id="audio-el"></audio>
+              <canvas class="wave-canvas" id="wave-canvas" height="56"></canvas>
+              <div class="act-row">
+                <button class="act-btn" onclick="dlAudio()">⬇ WAV</button>
+                <button class="act-btn accent" onclick="openShare()">🔗 Share</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!--ABOUT-->
+<div class="page scrollable" id="page-about">
+  <div class="cpage">
+    <h1>About PodcastAI</h1>
+    <p class="lead">An open-source tool that transforms static documents into listenable AI-hosted podcasts.</p>
+    <div class="csec">
+      <h2>What is PodcastAI?</h2>
+      <p>PodcastAI is an intelligent document-to-podcast converter that transforms written content into natural, engaging audio conversations. Instead of spending hours reading lengthy documents, you can listen to them anytime, anywhere.</p>
+      <p>Whether it's reports, study materials, txt files, docx or PDFs, PodcastAI converts your content into a podcast-style discussion between two AI hosts, making information easier to understand and more enjoyable to consume.</p>
+    </div>
+    <div class="csec">
+      <h2>How It Works</h2>
+      <ul style="color:dimgrey;padding-left:18px">
+        <li>Upload your document.</li>
+        <li>PodcastAI analyzes and extracts the important information.</li>
+        <li>The content is summarized and organized into key points.</li>
+        <li>Two AI hosts discuss the material in a conversational podcast format.</li>
+        <li>The generated podcast is converted into audio and made ready for listening.</li>
+      </ul>
+    </div>
+    <div class="csec">
+      <h2>Our Mission</h2>
+      <p>Our goal is to make knowledge more accessible by converting static documents into interactive audio experiences, helping users learn, understand, and stay productive wherever they are.</p>
+    </div>
+  </div>
+</div>
+
+<!--CONTACT -->
+<div class="page scrollable" id="page-contact">
+  <div class="cpage" style="max-width:580px">
+    <h1>Contact</h1>
+    <p class="lead">Bug report, feature request, or just want to say hi?</p>
+    <div class="card"><div class="card-body" style="padding:24px">
+      <div class="form-g"><label>Name</label><input class="form-ctrl" id="c-name" placeholder="Your name"/></div>
+      <div class="form-g"><label>Email</label><input class="form-ctrl" id="c-email" type="email" placeholder="you@example.com"/></div>
+      <div class="form-g"><label>Message</label><textarea class="form-ctrl" id="c-msg" placeholder="Your message…"></textarea></div>
+      <button class="submit-btn" onclick="submitContact()">Send message</button>
+    </div></div>
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div class="page" id="page-login">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">PodcastAI</div>
+      <div class="auth-sub">Sign in to your account</div>
+      <div class="form-g">
+        <label>Email</label>
+        <input class="form-ctrl" id="l-email" type="email" placeholder="you@example.com" onkeydown="if(event.key==='Enter')doLogin()"/>
+        <div class="ferr" id="l-eem"></div>
+      </div>
+      <div class="form-g">
+        <label>Password</label>
+        <input class="form-ctrl" id="l-pass" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"/>
+        <div class="ferr" id="l-pem"></div>
+      </div>
+      <button class="submit-btn" onclick="doLogin()">Sign in</button>
+      <div class="auth-link-row">No account? <a onclick="nav('signup')">Sign up</a></div>
+    </div>
+  </div>
+</div>
+
+<!--  SIGNUP  -->
+<div class="page" id="page-signup">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">PodcastAI</div>
+      <div class="auth-sub">Create your account</div>
+      <div class="form-g">
+        <label>Name</label>
+        <input class="form-ctrl" id="s-name" placeholder="Your name"/>
+        <div class="ferr" id="s-nem"></div>
+      </div>
+      <div class="form-g">
+        <label>Email</label>
+        <input class="form-ctrl" id="s-email" type="email" placeholder="you@example.com"/>
+        <div class="ferr" id="s-eem"></div>
+      </div>
+      <div class="form-g">
+        <label>Password</label>
+        <input class="form-ctrl" id="s-pass" type="password" placeholder="Min 8 characters"/>
+        <div class="ferr" id="s-pem"></div>
+      </div>
+      <button class="submit-btn" onclick="doSignup()">Create account</button>
+      <div class="auth-link-row">Have an account? <a onclick="nav('login')">Sign in</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- SHARE PAGE -->
+<div class="page scrollable" id="page-share">
+  <div class="share-hero">
+    <h1 id="share-title">Shared Podcast</h1>
+    <p id="share-meta"></p>
+  </div>
+  <div class="share-content">
+    <div class="card">
+      <div class="result-tabs">
+        <div class="rtab active" onclick="switchShareTab('script',this)">Script</div>
+        <div class="rtab" onclick="switchShareTab('audio',this)">Audio</div>
+      </div>
+      <div class="rpane active" id="share-pane-s"><div class="script-box" id="share-script"></div></div>
+      <div class="rpane" id="share-pane-a">
+        <audio controls class="audio-player" id="share-audio"></audio>
+        <div class="act-row" style="margin-top:8px">
+          <button class="act-btn" onclick="nav('home')">Try PodcastAI →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<div class="overlay" id="share-modal" style="display:none" onclick="closeModal(event,'share-modal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal(null,'share-modal')">✕</button>
+    <h3>Share this podcast</h3>
+    <p>Anyone with this link can listen — no login required.</p>
+    <div class="share-row">
+      <input type="text" id="share-url" readonly/>
+      <button class="act-btn accent" onclick="copyShare()">Copy</button>
+    </div>
+    <div class="modal-foot"><button class="act-btn" onclick="closeModal(null,'share-modal')">Done</button></div>
+  </div>
+</div>
+
+
+<div class="overlay" id="rename-modal" style="display:none" onclick="closeModal(event,'rename-modal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal(null,'rename-modal')">✕</button>
+    <h3>Rename podcast</h3>
+    <input class="rename-input" id="rename-inp" placeholder="New title…" onkeydown="if(event.key==='Enter')confirmRename()"/>
+    <div class="modal-foot">
+      <button class="act-btn" onclick="closeModal(null,'rename-modal')">Cancel</button>
+      <button class="act-btn accent" onclick="confirmRename()">Save</button>
+    </div>
+  </div>
+</div>
+
+</div>
+
+
+<script src="utils.js"></script>
+<script src="ui.js"></script>
+<script src="app.js"></script>
+<script src="navigation.js"></script>
+<script src="auth.js"></script>
+<script src="upload.js"></script>
+<script src="podcast.js"></script>
+<script src="history.js"></script>
+<script src="share.js"></script>
+
+<script>
+  updateAuthUI();
+  checkRoute();
+  if (S.user) fetchHistory();
+</script>
+
+</body>
+</html>
