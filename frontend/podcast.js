@@ -100,47 +100,60 @@ function renderScript(script, targetId) {
 function setAudio(b64, elemId) {
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
   const blob  = new Blob([bytes], { type: 'audio/mpeg' });
-  document.getElementById(elemId).src = URL.createObjectURL(blob);
+  const url   = URL.createObjectURL(blob);
+  const el    = document.getElementById(elemId);
+  el.src      = url;
+  console.log('Audio blob size:', bytes.length, 'bytes');
 }
 
 async function drawWaveform(b64) {
   const cv = document.getElementById('wave-canvas');
   if (!cv) return;
-  const bytes      = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  const audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
-  let   decoded;
-  try {
-    decoded = await audioCtx.decodeAudioData(bytes.buffer.slice(0));
-  } catch (e) {
-    console.warn('Waveform decode failed:', e);
-    return;
-  }
-  const samples = decoded.getChannelData(0);   
-  const ctx     = cv.getContext('2d');
-  cv.width      = cv.offsetWidth * 2;
+  const ctx = cv.getContext('2d');
+  cv.width  = cv.offsetWidth * 2;
   const W = cv.width, H = cv.height * 2;
   ctx.clearRect(0, 0, W, H);
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark    = document.documentElement.getAttribute('data-theme') === 'dark';
   ctx.strokeStyle = isDark ? '#3b82f6' : '#1a6ef5';
   ctx.lineWidth   = 1.5;
-  const step = Math.ceil(samples.length / W);
-  ctx.beginPath();
-  for (let x = 0; x < W; x++) {
-    let max = 0;
-    for (let j = 0; j < step; j++) { const v = Math.abs(samples[x * step + j] || 0); if (v > max) max = v; }
-    x === 0 ? ctx.moveTo(x, (H / 2) - (max * H / 2.2))
-            : ctx.lineTo(x, (H / 2) - (max * H / 2.2));
+  try {
+    const bytes    = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const decoded  = await audioCtx.decodeAudioData(bytes.buffer.slice(0));
+    const samples  = decoded.getChannelData(0);
+    audioCtx.close();
+
+    const step = Math.ceil(samples.length / W);
+    ctx.beginPath();
+    for (let x = 0; x < W; x++) {
+      let max = 0;
+      for (let j = 0; j < step; j++) { const v = Math.abs(samples[x * step + j] || 0); if (v > max) max = v; }
+      x === 0 ? ctx.moveTo(x, (H/2) - (max * H/2.2)) : ctx.lineTo(x, (H/2) - (max * H/2.2));
+    }
+    ctx.stroke();
+    ctx.beginPath();
+    for (let x = 0; x < W; x++) {
+      let max = 0;
+      for (let j = 0; j < step; j++) { const v = Math.abs(samples[x * step + j] || 0); if (v > max) max = v; }
+      x === 0 ? ctx.moveTo(x, (H/2) + (max * H/2.2)) : ctx.lineTo(x, (H/2) + (max * H/2.2));
+    }
+    ctx.stroke();
+
+  } catch (e) {
+    console.warn('Real waveform failed, drawing decorative:', e.message);
+    ctx.beginPath();
+    for (let x = 0; x < W; x++) {
+      const amp = 0.3 + 0.25 * Math.sin(x / 80) + 0.1 * Math.sin(x / 20);
+      x === 0 ? ctx.moveTo(x, (H/2) - (amp * H/2.2)) : ctx.lineTo(x, (H/2) - (amp * H/2.2));
+    }
+    ctx.stroke();
+    ctx.beginPath();
+    for (let x = 0; x < W; x++) {
+      const amp = 0.3 + 0.25 * Math.sin(x / 80) + 0.1 * Math.sin(x / 20);
+      x === 0 ? ctx.moveTo(x, (H/2) + (amp * H/2.2)) : ctx.lineTo(x, (H/2) + (amp * H/2.2));
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
-  ctx.beginPath();
-  for (let x = 0; x < W; x++) {
-    let max = 0;
-    for (let j = 0; j < step; j++) { const v = Math.abs(samples[x * step + j] || 0); if (v > max) max = v; }
-    x === 0 ? ctx.moveTo(x, (H / 2) + (max * H / 2.2))
-            : ctx.lineTo(x, (H / 2) + (max * H / 2.2));
-  }
-  ctx.stroke();
-  audioCtx.close();
 }
 
 function switchTab(name, el) {
