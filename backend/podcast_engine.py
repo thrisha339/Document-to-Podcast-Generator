@@ -5,15 +5,16 @@ load_dotenv()
 import re
 import time
 import base64
-import struct
 import logging
 import textwrap
 from concurrent.futures import ThreadPoolExecutor
+
 import pypdf
 from docx import Document as DocxDocument
 from pptx import Presentation
 from groq import Groq
 from elevenlabs import ElevenLabs
+
 # Logging 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +22,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("PodcastGen")
+
 try:
     import pytesseract
     from pdf2image import convert_from_bytes
@@ -30,44 +32,26 @@ except ImportError:
     OCR_AVAILABLE = False
     log.warning("OCR support: DISABLED — install tesseract + pdf2image for scanned PDFs")
 
-# API clients (keys read from environment)
+# API clients 
 GROQ_API_KEY       = os.environ.get("GROQ_API_KEY", "")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 if not GROQ_API_KEY:
     raise EnvironmentError("Missing GROQ_API_KEY — add it to your .env file.")
 if not ELEVENLABS_API_KEY:
     raise EnvironmentError("Missing ELEVENLABS_API_KEY — add it to your .env file.")
+
 groq_client       = Groq(api_key=GROQ_API_KEY)
 elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+
 try:
     voices = elevenlabs_client.voices.get_all()
-    log.info("ElevenLabs connected successfully")
+    log.info("ElevenLabs connected — %d voices available", len(voices.voices))
 except Exception as e:
-    log.error("ElevenLabs error: %s", e)
+    log.error("ElevenLabs connection error: %s", e)
 
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 VOICE_ALEX   = "nPczCjzI2devNBz1zQrb"
 VOICE_JORDAN = "cgSgspJ2msm6clMCkdW9"
-
-SAMPLE_RATE     = 22050   
-PAUSE_MS        = 400     
-
-def _check_pydub() -> bool:
-    try:
-        from pydub import AudioSegment   
-        return True
-    except ImportError:
-        return False
-
-PYDUB_AVAILABLE = _check_pydub()
-if PYDUB_AVAILABLE:
-    log.info("pydub: AVAILABLE — using MP3 output format (environment-safe)")
-else:
-    log.warning(
-        "pydub: NOT AVAILABLE — falling back to raw PCM. "
-        "If you hear buzz on Render, add pydub + ffmpeg to requirements."
-    )
-
 # Text extraction 
 
 def extract_text(file_bytes: bytes, filename: str) -> str:
@@ -79,7 +63,7 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
         doc  = DocxDocument(io.BytesIO(file_bytes))
         text = "\n".join(p.text for p in doc.paragraphs)
     elif ext in ("ppt", "pptx"):
-        prs  = Presentation(io.BytesIO(file_bytes))
+        prs   = Presentation(io.BytesIO(file_bytes))
         lines = []
         for slide in prs.slides:
             for shape in slide.shapes:
@@ -94,6 +78,7 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
             text = file_bytes.decode("latin-1", errors="replace")
     else:
         raise ValueError(f"Unsupported file type: .{ext}")
+
     cleaned = _clean_text(text)
     log.info("Extracted %d chars / ~%d words.", len(cleaned), len(cleaned.split()))
     if not cleaned:
@@ -102,6 +87,7 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
             "If it is a scanned PDF, install tesseract and pdf2image."
         )
     return cleaned
+
 
 def _extract_pdf(file_bytes: bytes) -> str:
     reader      = pypdf.PdfReader(io.BytesIO(file_bytes))
@@ -123,6 +109,7 @@ def _extract_pdf(file_bytes: bytes) -> str:
         )
     return _ocr_pdf(file_bytes, total_pages)
 
+
 def _ocr_pdf(file_bytes: bytes, total_pages: int) -> str:
     dpi = 150 if total_pages > 30 else 200
     log.info("OCR: %d pages at %d DPI...", total_pages, dpi)
@@ -140,6 +127,7 @@ def _ocr_pdf(file_bytes: bytes, total_pages: int) -> str:
     with ThreadPoolExecutor(max_workers=4) as ex:
         for idx, text in ex.map(_ocr_page, enumerate(images)):
             results[idx] = text
+
     combined = "\n".join(results.get(i, "") for i in range(len(images)))
     log.info("OCR done: %d chars in %.1fs.", len(combined), time.time() - t0)
     if not combined.strip():
@@ -152,8 +140,6 @@ def _clean_text(raw: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[^\x20-\x7E\n]", "", text)
     return text.strip()
-
-#  Boilerplate filtering 
 
 _BOILERPLATE_LINE_PATTERNS = [
     r"^page\s*(no|number)?[\s.:]*\d*$", r"^-\s*\d+\s*-$",
@@ -201,8 +187,6 @@ def _regex_filter(text: str) -> str:
         if cleaned:
             kept.append(cleaned)
     return "\n\n".join(kept)
-
-
 def _llm_filter_chunks(chunks: list[str]) -> list[str]:
     kept = []
     for chunk in chunks:
@@ -216,7 +200,6 @@ def _llm_filter_chunks(chunks: list[str]) -> list[str]:
             kept.append(chunk)
     return kept
 
-
 def filter_boilerplate(text: str) -> str:
     after_regex = _regex_filter(text) or text
     candidates  = [
@@ -226,15 +209,11 @@ def filter_boilerplate(text: str) -> str:
     ]
     kept = _llm_filter_chunks(candidates)
     return "\n\n".join(kept) if kept else after_regex
-
-
-# Chunking + summarisation 
-
+# Chunking + summarisation
 def chunk_text(text: str, size: int = 2000) -> list[str]:
     chunks = [c.strip() for c in textwrap.wrap(text, width=size, break_long_words=False) if c.strip()]
     log.info("Chunked into %d pieces.", len(chunks))
     return chunks
-
 def _groq(prompt: str, max_tokens: int = 1024, retries: int = 3) -> str:
     for attempt in range(1, retries + 1):
         try:
@@ -268,8 +247,8 @@ def hierarchical_summarise(summaries: list[str]) -> list[str]:
         _groq("Combine into ONE paragraph of 80-100 words:\n\n" + "\n\n".join(f"- {s}" for s in b))
         for b in batches
     ]
+# Script generation
 
-#Script generation
 SCRIPT_PROMPT = """\
 Write a natural podcast conversation between Alex and Jordan using these summaries.
 
@@ -285,7 +264,6 @@ SUMMARIES:
 
 BEGIN:
 """
-
 LINE_RE = re.compile(r"^(Alex|Jordan)\s*:\s*(.+)$", re.IGNORECASE)
 def generate_script(summaries: list[str]) -> str:
     combined = "\n\n".join(summaries)
@@ -301,6 +279,8 @@ def generate_script(summaries: list[str]) -> str:
         temperature=0.8,
     )
     return r.choices[0].message.content.strip()
+
+
 def parse_script(script: str) -> list[dict]:
     dialogue, last = [], "Alex"
     for line in script.splitlines():
@@ -325,7 +305,8 @@ def parse_script(script: str) -> list[dict]:
 def _split_tts(text: str, size: int = 250) -> list[str]:
     if len(text) <= size:
         return [text]
-    sentences, chunks, cur = re.split(r"(?<=[.!?])\s+", text), [], ""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    chunks, cur = [], ""
     for s in sentences:
         if len(cur) + len(s) + 1 <= size:
             cur = (cur + " " + s).strip()
@@ -336,124 +317,74 @@ def _split_tts(text: str, size: int = 250) -> list[str]:
     if cur:
         chunks.append(cur)
     return chunks or [text[:size]]
-
-def _tts_mp3(text: str, voice_id: str) -> bytes:
-    """Fetch TTS as MP3 (self-describing format, environment-agnostic)."""
-    return b"".join(
-        elevenlabs_client.text_to_speech.convert(
-            text=text,
-            voice_id=voice_id,
-            model_id="eleven_turbo_v2",
-            output_format="mp3_44100_128",  
-        )
-    )
-
-def _tts_pcm_fallback(text: str, voice_id: str) -> bytes:
+def _tts_segment(text: str, voice_id: str) -> bytes:
     """
-    Fallback: raw PCM at 22050 Hz mono.
-    Only used when pydub is unavailable.
-    WARNING: May produce buzz on Render if ElevenLabs returns unexpected format.
+    Fetch one TTS segment as MP3.
+
+    Key fix: exhaust the generator into a bytearray (not b"".join of a lazy
+    generator) so we hold a reference to ALL chunks before returning.
+    This prevents partial reads on Render's network.
     """
-    return b"".join(
-        elevenlabs_client.text_to_speech.convert(
-            text=text,
-            voice_id=voice_id,
-            model_id="eleven_turbo_v2",
-            output_format="pcm_22050",
-        )
-    )
+    buf = bytearray()
+    for chunk in elevenlabs_client.text_to_speech.convert(
+        text=text,
+        voice_id=voice_id,
+        model_id="eleven_turbo_v2",
+        output_format="mp3_44100_128",   
+    ):
+        if chunk:                        
+            buf.extend(chunk)
 
-def _build_wav_header(pcm_data: bytes, sample_rate: int = 22050, channels: int = 1, bit_depth: int = 16) -> bytes:
-    """Build a correct WAV header for the given PCM data."""
-    data_size  = len(pcm_data)
-    byte_rate  = sample_rate * channels * (bit_depth // 8)
-    block_align = channels * (bit_depth // 8)
-    header = struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
-        b"RIFF",
-        36 + data_size,   
-        b"WAVE",
-        b"fmt ",
-        16,               
-        1,                
-        channels,
-        sample_rate,
-        byte_rate,
-        block_align,
-        bit_depth,
-        b"data",
-        data_size,
-    )
-    return header
+    if len(buf) < 100:
+        raise RuntimeError(f"TTS returned suspiciously small payload ({len(buf)} bytes) for: {text[:40]!r}")
 
+    return bytes(buf)
+_MP3_SILENCE_FRAME = (
+    b"\xff\xfb\x90\x00"   
+    + b"\x00" * 413        
+)
+_MP3_PAUSE = _MP3_SILENCE_FRAME * 8   
 def generate_audio(dialogue: list[dict]) -> bytes:
     """
-    Generate audio for all dialogue entries and return a WAV file as bytes.
-
-    Primary path  : MP3 via pydub (reliable on all environments including Render)
-    Fallback path : raw PCM 22050 Hz (works locally, may buzz on Render)
+    Generate all dialogue as MP3 and concatenate with silence pauses.
+    Returns raw MP3 bytes (no WAV wrapping needed).
+    MP3 concatenation is safe because each frame is self-contained.
     """
-    if PYDUB_AVAILABLE:
-        return _generate_audio_pydub(dialogue)
-    else:
-        log.warning("Using raw PCM fallback — install pydub + ffmpeg to fix potential buzz on Render")
-        return _generate_audio_pcm(dialogue)
-
-
-def _generate_audio_pydub(dialogue: list[dict]) -> bytes:
-    """
-    Collect MP3 segments → decode with pydub → normalise sample rate → export WAV.
-    This avoids manual WAV header construction entirely.
-    """
-    from pydub import AudioSegment
-
-    combined  = AudioSegment.empty()
-    pause_seg = AudioSegment.silent(duration=PAUSE_MS)  
+    segments: list[bytes] = []
+    total_chars = 0
 
     for i, entry in enumerate(dialogue, 1):
         for sub in _split_tts(entry["text"]):
-            try:
-                mp3_bytes = _tts_mp3(sub, entry["voice_id"])
-                seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
-                seg = seg.set_frame_rate(SAMPLE_RATE).set_channels(1).set_sample_width(2)
-                combined += seg
-            except Exception as e:
-                log.warning("TTS line %d ('%s'): %s — skipping segment", i, sub[:40], e)
-        combined += pause_seg
+            for attempt in range(1, 4):
+                try:
+                    mp3_bytes = _tts_segment(sub, entry["voice_id"])
+                    segments.append(mp3_bytes)
+                    total_chars += len(sub)
+                    break
+                except Exception as e:
+                    log.warning("TTS line %d attempt %d: %s", i, attempt, e)
+                    if attempt < 3:
+                        time.sleep(1.5 * attempt)
+        segments.append(_MP3_PAUSE)
 
-    if len(combined) == 0:
+    if not segments:
         raise RuntimeError("No audio segments were generated.")
-
-    buf = io.BytesIO()
-    combined.export(buf, format="wav")
-    wav_bytes = buf.getvalue()
-
-    duration = len(combined) / 1000.0
-    log.info("Audio: %.1f seconds (%.1f min).", duration, duration / 60)
-    return wav_bytes
-
-def _generate_audio_pcm(dialogue: list[dict]) -> bytes:
-    """
-    Raw PCM path (original approach).
-    Kept as fallback; buzz may occur on Render due to sample-rate mismatch.
-    """
-    segments = []
-    pause    = b"\x00\x00" * int(SAMPLE_RATE * 0.4)  
-    for i, entry in enumerate(dialogue, 1):
-        for sub in _split_tts(entry["text"]):
-            try:
-                segments.append(_tts_pcm_fallback(sub, entry["voice_id"]))
-            except Exception as e:
-                log.warning("TTS line %d: %s", i, e)
-        segments.append(pause)
-
-    pcm      = b"".join(segments)
-    wav      = _build_wav_header(pcm, sample_rate=SAMPLE_RATE, channels=1, bit_depth=16) + pcm
-
-    duration = len(pcm) / (SAMPLE_RATE * 2)
-    log.info("Audio: %.1f seconds (%.1f min).", duration, duration / 60)
-    return wav
+    mp3_out  = b"".join(segments)
+    duration = len(mp3_out) / 16_000
+    log.info(
+        "Audio: ~%.1f seconds (~%.1f min) — %d bytes MP3",
+        duration, duration / 60, len(mp3_out),
+    )
+    return mp3_out
 def run_pipeline(file_bytes: bytes, filename: str) -> dict:
+    """
+    Returns:
+        {
+          "script": str,
+          "audio":  str,          # base64-encoded MP3
+          "format": "audio/mpeg"  # tell your frontend to use this MIME type
+        }
+    """
     t0 = time.time()
     log.info("=== Pipeline START: %s ===", filename)
 
@@ -462,15 +393,17 @@ def run_pipeline(file_bytes: bytes, filename: str) -> dict:
     chunks    = chunk_text(filtered)
     if not chunks:
         raise ValueError("No meaningful content found after filtering.")
-
     summaries  = summarise_chunks(chunks)
     final_sums = hierarchical_summarise(summaries)
     script     = generate_script(final_sums)
     dialogue   = parse_script(script)
-
     if not dialogue:
         raise ValueError("Script parsing produced no dialogue.")
-    wav       = generate_audio(dialogue)
-    audio_b64 = base64.b64encode(wav).decode()
+    mp3       = generate_audio(dialogue)
+    audio_b64 = base64.b64encode(mp3).decode()
     log.info("=== Pipeline DONE in %.1fs ===", time.time() - t0)
-    return {"script": script, "audio": audio_b64}
+    return {
+        "script": script,
+        "audio":  audio_b64,
+        "format": "audio/mpeg",   
+    }

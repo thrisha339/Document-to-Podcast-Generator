@@ -51,7 +51,7 @@ async function generate() {
 
     renderScript(data.script, 'script-out');
     setAudio(data.audio, 'audio-el');
-    drawWaveform(data.audio);
+    await drawWaveform(data.audio);
 
     document.getElementById('prog-card').style.display   = 'none';
     document.getElementById('result-card').style.display = 'block';
@@ -99,41 +99,48 @@ function renderScript(script, targetId) {
 
 function setAudio(b64, elemId) {
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  const blob  = new Blob([bytes], { type: 'audio/wav' });
+  const blob  = new Blob([bytes], { type: 'audio/mpeg' });
   document.getElementById(elemId).src = URL.createObjectURL(blob);
 }
 
-function drawWaveform(b64) {
+async function drawWaveform(b64) {
   const cv = document.getElementById('wave-canvas');
   if (!cv) return;
-  const ctx    = cv.getContext('2d');
-  cv.width     = cv.offsetWidth * 2;
-  const bytes  = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  const samples = new Int16Array(bytes.buffer.slice(44));
+  const bytes      = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
+  let   decoded;
+  try {
+    decoded = await audioCtx.decodeAudioData(bytes.buffer.slice(0));
+  } catch (e) {
+    console.warn('Waveform decode failed:', e);
+    return;
+  }
+  const samples = decoded.getChannelData(0);   
+  const ctx     = cv.getContext('2d');
+  cv.width      = cv.offsetWidth * 2;
   const W = cv.width, H = cv.height * 2;
   ctx.clearRect(0, 0, W, H);
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   ctx.strokeStyle = isDark ? '#3b82f6' : '#1a6ef5';
   ctx.lineWidth   = 1.5;
   const step = Math.ceil(samples.length / W);
-
   ctx.beginPath();
   for (let x = 0; x < W; x++) {
     let max = 0;
-    for (let j = 0; j < step; j++) { const v = Math.abs(samples[x * step + j] || 0) / 32768; if (v > max) max = v; }
-    const y = (H / 2) - (max * H / 2.2);
-    x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    for (let j = 0; j < step; j++) { const v = Math.abs(samples[x * step + j] || 0); if (v > max) max = v; }
+    x === 0 ? ctx.moveTo(x, (H / 2) - (max * H / 2.2))
+            : ctx.lineTo(x, (H / 2) - (max * H / 2.2));
   }
   ctx.stroke();
-
   ctx.beginPath();
   for (let x = 0; x < W; x++) {
     let max = 0;
-    for (let j = 0; j < step; j++) { const v = Math.abs(samples[x * step + j] || 0) / 32768; if (v > max) max = v; }
-    const y = (H / 2) + (max * H / 2.2);
-    x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    for (let j = 0; j < step; j++) { const v = Math.abs(samples[x * step + j] || 0); if (v > max) max = v; }
+    x === 0 ? ctx.moveTo(x, (H / 2) + (max * H / 2.2))
+            : ctx.lineTo(x, (H / 2) + (max * H / 2.2));
   }
   ctx.stroke();
+  audioCtx.close();
 }
 
 function switchTab(name, el) {
@@ -147,10 +154,10 @@ function dlAudio() {
   if (!S.audio64) return;
   const bytes = Uint8Array.from(atob(S.audio64), c => c.charCodeAt(0));
   const a = document.createElement('a');
-  a.href     = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
-  a.download = 'podcast.wav';
+  a.href     = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+  a.download = 'podcast.mp3';
   a.click();
-  toast('Downloading WAV…', 'info');
+  toast('Downloading MP3…', 'info');
 }
 
 function dlScript() {
