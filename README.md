@@ -125,5 +125,5 @@ Generate public share links that allow anyone to view and listen to generated po
 9. Podcast is saved to MongoDB.
 10. User can listen, share, rename, or delete podcasts.
 
-## Workflow
+## UI Overview
 ![alt text](image.png)
