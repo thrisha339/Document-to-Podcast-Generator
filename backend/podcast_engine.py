@@ -41,6 +41,14 @@ if not ELEVENLABS_API_KEY:
     raise EnvironmentError("Missing ELEVENLABS_API_KEY — add it to your .env file.")
 groq_client       = Groq(api_key=GROQ_API_KEY)
 elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+
+log.info("ElevenLabs key loaded: %s", ELEVENLABS_API_KEY[:8])
+try:
+    voices = elevenlabs_client.voices.get_all()
+    log.info("ElevenLabs connected successfully")
+except Exception as e:
+    log.error("ElevenLabs error: %s", e)
+
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 VOICE_ALEX   = "nPczCjzI2devNBz1zQrb"
 VOICE_JORDAN = "cgSgspJ2msm6clMCkdW9"
