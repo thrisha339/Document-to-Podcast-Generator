@@ -15,4 +15,3 @@ Thumbs.db
 *.log
 .pytest_cache/
 backend/generate_keys.py
-backend/requirements.txt
